@@ -1,4 +1,4 @@
-name: Build VCam External HAL Magisk Module
+name: Build VCam External HAL Magisk Module (With Binaries)
 
 on:
   workflow_dispatch:
@@ -7,41 +7,64 @@ jobs:
   build-module:
     runs-on: ubuntu-latest
     steps:
-      - name: Persiapan Lingkungan Build
+      - name: Persiapan Lingkungan & Download Android SDK
         run: |
+          sudo apt-get update && sudo apt-get install -y simg2img zip unzip
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "system-images;android-33;google_apis;arm64-v8a"
+          
+      - name: Ekstrak File Binary dari Vendor Google Emulator
+        run: |
+          IMG_DIR="$ANDROID_HOME/system-images/android-33/google_apis/arm64-v8a"
+          
+          # Konversi dan Mount Image
+          simg2img $IMG_DIR/vendor.img vendor.raw || cp $IMG_DIR/vendor.img vendor.raw
+          sudo mkdir -p /mnt/vendor
+          sudo mount -o loop,ro vendor.raw /mnt/vendor
+          
+          # Buat struktur folder Magisk
           mkdir -p VCam_External_HAL/META-INF/com/google/android
+          mkdir -p VCam_External_HAL/system/vendor/bin/hw
+          mkdir -p VCam_External_HAL/system/vendor/lib64/hw
           mkdir -p VCam_External_HAL/system/vendor/etc/init
           mkdir -p VCam_External_HAL/system/vendor/etc/vintf/manifest
           
+          # Curi file-file binary inti
+          cp /mnt/vendor/bin/hw/android.hardware.camera.provider@2.4-external-service VCam_External_HAL/system/vendor/bin/hw/
+          cp /mnt/vendor/lib64/hw/camera.device@*external*.so VCam_External_HAL/system/vendor/lib64/hw/
+          cp /mnt/vendor/etc/init/android.hardware.camera.provider@2.4-external-service.rc VCam_External_HAL/system/vendor/etc/init/
+          
+          sudo umount /mnt/vendor
+
       - name: Buat File Konfigurasi (module.prop)
         run: |
           cat << 'EOF' > VCam_External_HAL/module.prop
-          id=vcam_external_hal
-          name=VCam External Camera Provider
-          version=v1.0
-          versionCode=1
+          id=vcam_external_hal_pro
+          name=VCam External Camera Provider (Full Inject)
+          version=v2.0
+          versionCode=2
           author=Santuyajah212
-          description=Menginjeksi external_camera provider ke /dev/video3 untuk Redmi Note 10 Pro (A16)
+          description=Modul injeksi external_camera HAL dan binary untuk dev/video3 di Redmi Note 10 Pro (A16)
           EOF
 
-      - name: Buat Script Instalasi Magisk (updater-script)
+      - name: Buat Script Instalasi (updater-script & update-binary)
         run: |
           cat << 'EOF' > VCam_External_HAL/META-INF/com/google/android/updater-script
           #MAGISK
           EOF
           
-      - name: Buat Script Update Binary (update-binary)
-        run: |
           cat << 'EOF' > VCam_External_HAL/META-INF/com/google/android/update-binary
           #!/system/bin/sh
           OUTFD=$2
           ZIPFILE=$3
           ui_print() { echo -n -e "ui_print $1\n" > /proc/self/fd/$OUTFD; echo -n -e "ui_print\n" > /proc/self/fd/$OUTFD; }
-          ui_print "- Menginstal VCam External HAL..."
+          ui_print "- Menginstal VCam External HAL (Full Binary)..."
           unzip -o "$ZIPFILE" 'system/*' -d $MODPATH >&2
-          ui_print "- Mengatur perizinan file..."
+          
+          ui_print "- Mengatur perizinan file sistem..."
           set_perm_recursive $MODPATH 0 0 0755 0644
+          set_perm_recursive $MODPATH/system/vendor/bin 0 2000 0755 0755
           set_perm_recursive $MODPATH/system/vendor/etc/init 0 2000 0755 0644
+          
           ui_print "- Selesai! Silakan Reboot."
           EOF
           chmod +x VCam_External_HAL/META-INF/com/google/android/update-binary
@@ -51,8 +74,7 @@ jobs:
           cat << 'EOF' > VCam_External_HAL/system/vendor/etc/external_camera_config.xml
           <ExternalCamera>
               <Provider>
-                  <ignore>
-                      </ignore>
+                  <ignore> </ignore>
               </Provider>
               <Device>
                   <MaxJpegBufferSize bytes="3145728"/>
@@ -87,7 +109,6 @@ jobs:
         run: |
           cat << 'EOF' > VCam_External_HAL/post-fs-data.sh
           #!/system/bin/sh
-          # Pastikan /dev/video3 terbaca oleh sistem kamera
           chmod 0666 /dev/video3
           chown system:camera /dev/video3
           EOF
@@ -96,10 +117,10 @@ jobs:
       - name: Packing Modul Menjadi ZIP
         run: |
           cd VCam_External_HAL
-          zip -r9 ../VCam_External_HAL_v1.zip *
+          zip -r9 ../VCam_External_HAL_v2.zip *
           
       - name: Upload Modul ke GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: VCam_External_HAL_Magisk_Module
-          path: VCam_External_HAL_v1.zip
+          name: VCam_External_HAL_v2
+          path: VCam_External_HAL_v2.zip
