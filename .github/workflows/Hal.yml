@@ -1,0 +1,105 @@
+name: Build VCam External HAL Magisk Module
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-module:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Persiapan Lingkungan Build
+        run: |
+          mkdir -p VCam_External_HAL/META-INF/com/google/android
+          mkdir -p VCam_External_HAL/system/vendor/etc/init
+          mkdir -p VCam_External_HAL/system/vendor/etc/vintf/manifest
+          
+      - name: Buat File Konfigurasi (module.prop)
+        run: |
+          cat << 'EOF' > VCam_External_HAL/module.prop
+          id=vcam_external_hal
+          name=VCam External Camera Provider
+          version=v1.0
+          versionCode=1
+          author=Santuyajah212
+          description=Menginjeksi external_camera provider ke /dev/video3 untuk Redmi Note 10 Pro (A16)
+          EOF
+
+      - name: Buat Script Instalasi Magisk (updater-script)
+        run: |
+          cat << 'EOF' > VCam_External_HAL/META-INF/com/google/android/updater-script
+          #MAGISK
+          EOF
+          
+      - name: Buat Script Update Binary (update-binary)
+        run: |
+          cat << 'EOF' > VCam_External_HAL/META-INF/com/google/android/update-binary
+          #!/system/bin/sh
+          OUTFD=$2
+          ZIPFILE=$3
+          ui_print() { echo -n -e "ui_print $1\n" > /proc/self/fd/$OUTFD; echo -n -e "ui_print\n" > /proc/self/fd/$OUTFD; }
+          ui_print "- Menginstal VCam External HAL..."
+          unzip -o "$ZIPFILE" 'system/*' -d $MODPATH >&2
+          ui_print "- Mengatur perizinan file..."
+          set_perm_recursive $MODPATH 0 0 0755 0644
+          set_perm_recursive $MODPATH/system/vendor/etc/init 0 2000 0755 0644
+          ui_print "- Selesai! Silakan Reboot."
+          EOF
+          chmod +x VCam_External_HAL/META-INF/com/google/android/update-binary
+
+      - name: Buat Konfigurasi External Camera (XML)
+        run: |
+          cat << 'EOF' > VCam_External_HAL/system/vendor/etc/external_camera_config.xml
+          <ExternalCamera>
+              <Provider>
+                  <ignore>
+                      </ignore>
+              </Provider>
+              <Device>
+                  <MaxJpegBufferSize bytes="3145728"/>
+                  <FpsConf>
+                      <maxFps>30.0</maxFps>
+                  </FpsConf>
+                  <VideoSize>
+                      <width>1280</width>
+                      <height>720</height>
+                  </VideoSize>
+              </Device>
+          </ExternalCamera>
+          EOF
+
+      - name: Buat VINTF Manifest (Bypass Anti-Hook)
+        run: |
+          cat << 'EOF' > VCam_External_HAL/system/vendor/etc/vintf/manifest/external_camera_manifest.xml
+          <manifest version="1.0" type="device">
+              <hal format="hidl">
+                  <name>android.hardware.camera.provider</name>
+                  <transport>hwbinder</transport>
+                  <version>2.4</version>
+                  <interface>
+                      <name>ICameraProvider</name>
+                      <instance>external/0</instance>
+                  </interface>
+              </hal>
+          </manifest>
+          EOF
+
+      - name: Buat Script Auto-Bind device node (post-fs-data.sh)
+        run: |
+          cat << 'EOF' > VCam_External_HAL/post-fs-data.sh
+          #!/system/bin/sh
+          # Pastikan /dev/video3 terbaca oleh sistem kamera
+          chmod 0666 /dev/video3
+          chown system:camera /dev/video3
+          EOF
+          chmod +x VCam_External_HAL/post-fs-data.sh
+
+      - name: Packing Modul Menjadi ZIP
+        run: |
+          cd VCam_External_HAL
+          zip -r9 ../VCam_External_HAL_v1.zip *
+          
+      - name: Upload Modul ke GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: VCam_External_HAL_Magisk_Module
+          path: VCam_External_HAL_v1.zip
